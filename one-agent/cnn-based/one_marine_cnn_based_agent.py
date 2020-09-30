@@ -16,7 +16,7 @@ APM = 0
 APM = int(APM / 18.75)
 UNLIMIT = 0
 VISUALIZE = False
-REALTIME = False # 실험 결과 볼 때, True로 해놓고 보는 
+REALTIME = False # 실험 결과 볼 때, True로 해놓고 보는 용도 
 if REALTIME :
     REALTIME_GAME_LOOP_SECONDS = 1
 else:
