@@ -180,7 +180,7 @@ def main(args):
                         else:
                             #첫 두스텝 이후 스텝은 action info length가 5
                             state,action,action_coords,action_prob = action_info
-                            print("action_prob : ",action_prob.item())
+                            #print("action_prob : ",action_prob.item())
                         #이번 스텝만의 reward를 구하려면 다음 step에서 얻는 mineral에서 지금 step에서 가지고 있는 mineral을 빼면됨
                         reward = - timestep[0].observation.player.minerals 
                         timestep = env.step(action)
