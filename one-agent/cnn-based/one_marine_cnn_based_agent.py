@@ -16,7 +16,7 @@ APM = 0
 APM = int(APM / 18.75)
 UNLIMIT = 0
 VISUALIZE = False
-REALTIME = True
+REALTIME = False # 실험 결과 볼 때, True로 해놓고 보는 
 if REALTIME :
     REALTIME_GAME_LOOP_SECONDS = 1
 else:
@@ -78,17 +78,26 @@ class Agent(base_agent.BaseAgent):
     def step(self,obs):
         super(Agent,self).step(obs)
         if obs.first(): 
+            #첫 step일 때, marine 두기중 하나 random으로 선택
             control_marine = [unit for unit in obs.observation.feature_units if unit.unit_type == units.Terran.Marine][0]
             return actions.FUNCTIONS.select_point("select",(control_marine.x,control_marine.y))
         elif obs.observation.control_groups[CONTROL_GROUP_SET][0] == 0:
+            #두번째 step일 때, 선택된 marine을 부대지정함
+            #사실 현재 꼭필요는 없지만 이후 두 marine 모두 이용하는 version에서 필요함
             return actions.FUNCTIONS.select_control_group([CONTROL_GROUP_SET], [MARINE_GROUP_ORDER])
+        #환경 전처리
         state = get_state(obs)
         screen = torch.tensor(state).unsqueeze(0).float()
+        #action probability와 value 얻음
         action_prob,value = self.network(screen)
         action_dist = Categorical(action_prob)
+        #action sampling
         action_coords = action_dist.sample().reshape(-1,1)
+        #action -> x,y coordinates로 바꿈
         y,x = torch.cat((action_coords // SCREEN_SIZE, action_coords % SCREEN_SIZE), dim=1)[0]
+        #실제 environment에 들어갈 action function call
         action = actions.FunctionCall(MOVE_SCREEN,[NOT_QUEUED,[x.item(),y.item()]])
+        #현재 preprocessed state, real action(environment에 들어갈), flatten action, flatten action probabilty
         return state,[action],action_coords[0][0].item(),action_prob[0][action_coords[0][0].item()]
     
     def put_data(self,transition):
@@ -166,17 +175,20 @@ def main(args):
                     for t in range(T_HORIZON):
                         action_info = agent.step(timestep[0])
                         if len(action_info) == 2:
+                            #첫 두스텝은 action info length가 2
                             action = [action_info]
                         else:
+                            #첫 두스텝 이후 스텝은 action info length가 5
                             state,action,action_coords,action_prob = action_info
                             print("action_prob : ",action_prob.item())
-
+                        #이번 스텝만의 reward를 구하려면 다음 step에서 얻는 mineral에서 지금 step에서 가지고 있는 mineral을 빼면됨
                         reward = - timestep[0].observation.player.minerals 
                         timestep = env.step(action)
                         reward += timestep[0].observation.player.minerals
                         if timestep[0].last():
                             done = True
                         if (len(action_info) > 2) :
+                            #첫 두스텝 이후 스텝은 action info length가 5
                             next_state = get_state(timestep[0])
                             agent.put_data((state, action_coords, reward/100.0, next_state, action_prob.item(), done))
                         if done == True:
