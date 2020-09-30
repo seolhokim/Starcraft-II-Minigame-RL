@@ -143,7 +143,7 @@ class Agent(base_agent.BaseAgent):
             ratio = torch.exp(torch.log(pi_a) - torch.log(prob_a))
             surr1 = ratio * advantage
             surr2 = torch.clamp(ratio, 1-EPS_CLIP, 1+EPS_CLIP) * advantage
-            loss = -torch.min(surr1, surr2).mean().float() + F.smooth_l1_loss(v , td_target.detach()).float()
+            loss = -torch.min(surr1, surr2).mean() + F.smooth_l1_loss(v , td_target.detach().float())
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
