@@ -145,7 +145,7 @@ class Agent(base_agent.BaseAgent):
             surr2 = torch.clamp(ratio, 1-EPS_CLIP, 1+EPS_CLIP) * advantage
             loss = -torch.min(surr1, surr2).mean() + F.smooth_l1_loss(v , td_target.detach())
             self.optimizer.zero_grad()
-            loss.mean().backward()
+            loss.backward()
             self.optimizer.step()
         return True
 def get_state(obs):
