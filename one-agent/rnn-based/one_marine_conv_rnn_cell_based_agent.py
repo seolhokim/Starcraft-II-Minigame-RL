@@ -9,6 +9,7 @@ from torch.distributions import Categorical
 
 import numpy as np
 import time
+import copy
 from absl import app
 
 MAPNAME = 'CollectMineralShards'
@@ -31,7 +32,7 @@ MARINE_GROUP_ORDER = 1
 MOVE_SCREEN = 331
 NOT_QUEUED = [0]
 
-CNN_LSTM_CHANNEL_NUM = 1
+CNN_LSTM_CHANNEL_NUM = 4
 LEARNING_RATE = 0.001
 GAMMA         = 0.98
 LMBDA         = 0.95
@@ -87,23 +88,22 @@ class Network(nn.Module):
         super(Network,self).__init__()
         self.conv_1 = nn.Conv2d(in_channels = 2, out_channels = 4, kernel_size = 3, stride = 1,padding = 1)
         self.maxpooling = nn.MaxPool2d(2)
-        self.conv_2 = nn.Conv2d(in_channels = 4, out_channels = 16, kernel_size = 3, stride = 1,padding = 1)
-        
-        self.conv_lstm = ConvLSTMCell(16,CNN_LSTM_CHANNEL_NUM,(3,3),True)
-        self.conv_3 = nn.Conv2d(in_channels = CNN_LSTM_CHANNEL_NUM, out_channels = 1, kernel_size = 3, stride = 1,padding = 1)
-        self.linear_1 = nn.Linear(SCREEN_SIZE * SCREEN_SIZE,128)
+        self.conv_lstm = ConvLSTMCell(4,CNN_LSTM_CHANNEL_NUM,(3,3),True)
+        #self.conv_3 = nn.Conv2d(in_channels = CNN_LSTM_CHANNEL_NUM, out_channels = 1, kernel_size = 3, stride = 1,padding = 1)
+        self.deconv_1 = nn.ConvTranspose2d(CNN_LSTM_CHANNEL_NUM, 1, 3, stride=2, padding=1, output_padding=1)
+        self.linear_1 = nn.Linear(4*int(SCREEN_SIZE/2 * SCREEN_SIZE/2),128)
         self.linear_2 = nn.Linear(128,1)
     def forward(self,x,hidden_state):
         x = F.relu(self.conv_1(x))
-        x = F.relu(self.conv_2(x))
-        x,c = self.conv_lstm(x,hidden_state)
-        h = x
-        x = self.conv_3(F.relu(x))
+        x = self.maxpooling(x)
+        encoded,c = self.conv_lstm(x,hidden_state)
+        h = encoded.clone().detach()#copy.deepcopy(encoded)
+        x = self.deconv_1(F.relu(encoded))
         x = x.view(-1, SCREEN_SIZE * SCREEN_SIZE)
         action = F.softmax(x,-1)
-        value = F.relu(self.linear_1(x))
+        value = F.relu(self.linear_1(encoded.view(-1,4*int(SCREEN_SIZE/2 * SCREEN_SIZE/2))))
         value = self.linear_2(value)
-        return action,value,(h,c)
+        return action,value,(h,c.detach())
 
 class Agent(base_agent.BaseAgent):
     def __init__(self):
@@ -153,15 +153,15 @@ class Agent(base_agent.BaseAgent):
                                          torch.tensor(done_lst, dtype=torch.float), torch.tensor(prob_a_lst)
         self.data = []
         
-        return s,a,r,s_prime, done_mask, prob_a, h_in_lst[0], h_out_lst[0]
+        return s,a,r,s_prime, done_mask, prob_a, h_in_lst, h_out_lst
              
     def train(self):
         if len(self.data) == 0:
             print("done train error")
             return False
-        s, a, r, s_prime, done_mask, prob_a, (h1_in, h2_in), (h1_out, h2_out) = self.make_batch()
-        first_hidden  = (h1_in.detach(), h2_in.detach())
-        second_hidden = (h1_out.detach(), h2_out.detach())
+        s, a, r, s_prime, done_mask, prob_a, h_in_lst, h_out_lst= self.make_batch()
+        first_hidden  = (h_in_lst[0][0], h_in_lst[0][1])
+        second_hidden = (h_out_lst[0][0], h_out_lst[0][1])
         for i in range(K_EPOCH):
             pi_lst = []
             v_lst = []
@@ -172,12 +172,15 @@ class Agent(base_agent.BaseAgent):
                 pi_lst.append(pi)
                 v_lst.append(v)
                 next_value_lst.append(next_value)
-                first_hidden  = (h1_in.detach(), h2_in.detach())
-                second_hidden = (h1_out.detach(), h2_out.detach())
+                first_hidden  = (h1_in, h2_in)
+                ####first_hidden  = (h1_in, h2_in)
+                second_hidden = (h1_out, h2_out)
+                ####second_hidden = (h1_out, h2_out)
+                #first_hidden  = (h_in_lst[batch_idx][0].detach(), h_in_lst[batch_idx][1].detach())
+                #second_hidden = (h_out_lst[batch_idx][0].detach(), h_out_lst[batch_idx][1].detach())
             pi = torch.stack(pi_lst,0).squeeze(1)
             v = torch.stack(v_lst,0).squeeze(1)
             next_value = torch.stack(next_value_lst,0).squeeze(1)
-
             td_target = r + GAMMA * next_value * done_mask
             delta = td_target - v
             delta = delta.detach().numpy()
@@ -191,12 +194,14 @@ class Agent(base_agent.BaseAgent):
             
             pi_a = pi.gather(1,a)
             ratio = torch.exp(torch.log(pi_a) - torch.log(prob_a))
-            print('ratio.mean() : ',ratio.mean())
             surr1 = ratio * advantage
             surr2 = torch.clamp(ratio, 1-EPS_CLIP, 1+EPS_CLIP) * advantage
-            loss = -torch.min(surr1, surr2) + F.smooth_l1_loss(v , td_target.detach().float())
+            loss = -torch.min(surr1, surr2).mean() + F.smooth_l1_loss(v , td_target.detach().float())
+            #print("loss 1(up) : ",-torch.min(surr1, surr2).mean())
+            #print("loss 2(down) : ",F.smooth_l1_loss(v , td_target.detach().float()))
+            print("ratio : ",ratio.mean())
             self.optimizer.zero_grad()
-            loss.mean().backward(retain_graph=True)
+            loss.backward(retain_graph=True)#retain_graph=True
             self.optimizer.step()
         return True
 def get_state(obs):
@@ -222,8 +227,8 @@ def main(args):
                 agent.reset()
                 done = False
                 
-                h_out = (torch.zeros(1, CNN_LSTM_CHANNEL_NUM, int(SCREEN_SIZE), int(SCREEN_SIZE)),
-                torch.zeros(1, CNN_LSTM_CHANNEL_NUM, int(SCREEN_SIZE), int(SCREEN_SIZE)))
+                h_out = (torch.zeros(1, CNN_LSTM_CHANNEL_NUM, int(SCREEN_SIZE/2), int(SCREEN_SIZE/2)),
+                torch.zeros(1, CNN_LSTM_CHANNEL_NUM, int(SCREEN_SIZE/2), int(SCREEN_SIZE/2)))
                 while not done:
                     for t in range(T_HORIZON):
                         h_in = h_out
@@ -232,7 +237,7 @@ def main(args):
                             action = [action_info]
                         else:
                             state,action,action_coords,action_prob,h_out = action_info
-                            print("action_prob : ",action_prob.item())
+                            #print("action : ",action_coords)
 
                         reward = - timestep[0].observation.player.minerals
                         timestep = env.step(action)
