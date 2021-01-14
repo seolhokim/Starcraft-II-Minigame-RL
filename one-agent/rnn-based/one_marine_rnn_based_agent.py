@@ -58,7 +58,7 @@ class Network(nn.Module):
         self.conv_2 = nn.Conv2d(4,1,3,1,padding = 1)
         self.deconv_1 = nn.ConvTranspose2d(1, 1, 3, stride=2, padding=1, output_padding=1)
         #self.deconv_1_1 = nn.ConvTranspose2d(1, 1, 3, stride=2, padding=1, output_padding=1)
-        self.value_1 = nn.Linear(1 * 32*32,128)
+        self.value_1 = nn.Linear(1 * SCREEN_SIZE/2*SCREEN_SIZE/2,128)
         self.value_2 = nn.Linear(128,1)
     def forward(self,x,hidden_state):
         batch_size = x.size(0)
@@ -66,15 +66,14 @@ class Network(nn.Module):
         x = x.view(batch_size,1, 4 * int(SCREEN_SIZE * SCREEN_SIZE))
         x,hidden = self.lstm(x,hidden_state)
         x = x.view(batch_size,4,int(SCREEN_SIZE) , int(SCREEN_SIZE))
-        encoded = F.relu(self.conv_2(x))
-        #encoded = self.pooling(x)
+        #encoded = F.relu(self.conv_2(x))
+        encoded = self.pooling(x)
         
-        #x = F.relu(self.deconv_1(encoded))
-        #x = (self.deconv_1_1(x))
+        x = (self.deconv_1(encoded))
         x = encoded.view(-1,SCREEN_SIZE*SCREEN_SIZE)
         action = F.softmax(x,-1)
         
-        value = encoded.view(-1,1 * int(SCREEN_SIZE)*int(SCREEN_SIZE))
+        value = encoded.view(-1,1 * int(SCREEN_SIZE/2)*int(SCREEN_SIZE/2))
         value = self.value_1(value)
         value = F.relu(value)
         value = self.value_2(value)
@@ -82,7 +81,6 @@ class Network(nn.Module):
 
 class Agent(base_agent.BaseAgent):
     def __init__(self):
-        
         super(Agent,self).__init__()
         if device == 'cuda':
             self.network = Network().cuda()
@@ -93,15 +91,22 @@ class Agent(base_agent.BaseAgent):
     def step(self,obs,h_in):
         super(Agent,self).step(obs)
         if obs.first(): 
+            #첫 step일 때, marine 두기중 하나 random으로 선택
             control_marine = [unit for unit in obs.observation.feature_units if unit.unit_type == units.Terran.Marine][0]
             return actions.FUNCTIONS.select_point("select",(control_marine.x,control_marine.y))
         elif obs.observation.control_groups[CONTROL_GROUP_SET][0] == 0:
+            #두번째 step일 때, 선택된 marine을 부대지정함
+            #사실 현재 꼭필요는 없지만 이후 두 marine 모두 이용하는 version에서 필요함
             return actions.FUNCTIONS.select_control_group([CONTROL_GROUP_SET], [MARINE_GROUP_ORDER])
+        #환경 전처리
         state = get_state(obs)
         screen = torch.tensor(state).unsqueeze(0).float().to(device)
+        #action probability와 value 얻음
         action_prob,value,h_out = self.network(screen,h_in)
         action_dist = Categorical(action_prob)
+        #action sampling
         action_coords = action_dist.sample().reshape(-1,1)
+        #action -> x,y coordinates로 바꿈
         y,x = torch.cat((action_coords // SCREEN_SIZE, action_coords % SCREEN_SIZE), dim=1)[0]
         action = actions.FunctionCall(MOVE_SCREEN,[NOT_QUEUED,[x.item(),y.item()]])
         return state,[action],action_coords[0][0].item(),action_prob[0][action_coords[0][0].item()],h_out
@@ -136,9 +141,11 @@ class Agent(base_agent.BaseAgent):
             print("done train error")
             return False
         s, a, r, s_prime, done_mask, prob_a, (h1_in, h2_in), (h1_out, h2_out) = self.make_batch()
-        first_hidden  = (h1_in.detach(), h2_in.detach())
-        second_hidden = (h1_out.detach(), h2_out.detach())
+        first_hidden  = (h1_in.detach(), h2_in.detach()) #(1,1,4096),(1,1,4096)
+        second_hidden = (h1_out.detach(), h2_out.detach()) #(1,1,4096),(1,1,4096)
+        
         for i in range(K_EPOCH):
+            #1. self.network에서 나온 h_out이용한 inference
             pi,v,_ = self.network(s,first_hidden)
             td_target = r + GAMMA * self.network(s_prime,second_hidden)[1] * done_mask
             delta = td_target - v
