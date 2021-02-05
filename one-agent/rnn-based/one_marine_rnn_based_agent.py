@@ -51,29 +51,26 @@ interface = features.AgentInterfaceFormat(\
 class Network(nn.Module):
     def __init__(self):
         super(Network,self).__init__()
-        self.maxpooling = nn.MaxPool2d(2)
+        self.pooling = nn.MaxPool2d(2)
         self.conv_1 = nn.Conv2d(2,4,3,1,padding = 1)
-        self.lstm = nn.LSTM(4 * int(SCREEN_SIZE) * int(SCREEN_SIZE),4 * int((SCREEN_SIZE) * (SCREEN_SIZE)))
+        self.lstm = nn.LSTM(4 * int(SCREEN_SIZE/2) * int(SCREEN_SIZE/2),4 * int((SCREEN_SIZE)/2 * (SCREEN_SIZE)/2))
         
         self.conv_2 = nn.Conv2d(4,1,3,1,padding = 1)
-        self.deconv_1 = nn.ConvTranspose2d(1, 1, 3, stride=2, padding=1, output_padding=1)
-        #self.deconv_1_1 = nn.ConvTranspose2d(1, 1, 3, stride=2, padding=1, output_padding=1)
-        self.value_1 = nn.Linear(1 * SCREEN_SIZE/2*SCREEN_SIZE/2,128)
+        self.deconv_1 = nn.ConvTranspose2d(4, 1, 3, stride=2, padding=1, output_padding=1)
+        self.value_1 = nn.Linear(int(4 * SCREEN_SIZE/2*SCREEN_SIZE/2),128)
         self.value_2 = nn.Linear(128,1)
     def forward(self,x,hidden_state):
         batch_size = x.size(0)
         x = F.relu(self.conv_1(x))
-        x = x.view(batch_size,1, 4 * int(SCREEN_SIZE * SCREEN_SIZE))
-        x,hidden = self.lstm(x,hidden_state)
-        x = x.view(batch_size,4,int(SCREEN_SIZE) , int(SCREEN_SIZE))
-        #encoded = F.relu(self.conv_2(x))
         encoded = self.pooling(x)
         
-        x = (self.deconv_1(encoded))
-        x = encoded.view(-1,SCREEN_SIZE*SCREEN_SIZE)
+        x = self.deconv_1(encoded)
+        x = x.view(-1,SCREEN_SIZE*SCREEN_SIZE)
         action = F.softmax(x,-1)
         
-        value = encoded.view(-1,1 * int(SCREEN_SIZE/2)*int(SCREEN_SIZE/2))
+        x = encoded.view(batch_size,1, 4 * int(SCREEN_SIZE/2 * SCREEN_SIZE/2))
+        x,hidden = self.lstm(x,hidden_state)
+        value = x.view(-1,4 * int(SCREEN_SIZE/2)*int(SCREEN_SIZE/2))
         value = self.value_1(value)
         value = F.relu(value)
         value = self.value_2(value)
@@ -189,8 +186,8 @@ def main(args):
                 timestep = env.reset()
                 agent.reset()
                 done = False
-                h_out = (torch.zeros(1,1,4 * int(SCREEN_SIZE) * int(SCREEN_SIZE)).to(device),
-                torch.zeros(1,1,4 * int(SCREEN_SIZE) * int(SCREEN_SIZE)).to(device))
+                h_out = (torch.zeros(1,1,4 * int(SCREEN_SIZE/2) * int(SCREEN_SIZE/2)).to(device),
+                torch.zeros(1,1,4 * int(SCREEN_SIZE/2) * int(SCREEN_SIZE/2)).to(device))
                 while not done:
                     for t in range(T_HORIZON):
                         h_in = h_out
