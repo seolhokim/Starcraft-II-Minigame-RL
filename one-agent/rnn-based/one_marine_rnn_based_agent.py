@@ -53,24 +53,29 @@ class Network(nn.Module):
         super(Network,self).__init__()
         self.pooling = nn.MaxPool2d(2)
         self.conv_1 = nn.Conv2d(2,4,3,1,padding = 1)
+        
+        self.conv_2 = nn.Conv2d(4,4,3,1,padding = 1)
+        self.action_lstm = nn.LSTM(4 * int(SCREEN_SIZE/2) * int(SCREEN_SIZE/2),4 * int((SCREEN_SIZE)/2 * (SCREEN_SIZE)/2))
+        
         self.lstm = nn.LSTM(4 * int(SCREEN_SIZE/2) * int(SCREEN_SIZE/2),4 * int((SCREEN_SIZE)/2 * (SCREEN_SIZE)/2))
         
-        self.conv_2 = nn.Conv2d(4,1,3,1,padding = 1)
         self.deconv_1 = nn.ConvTranspose2d(4, 1, 3, stride=2, padding=1, output_padding=1)
         self.value_1 = nn.Linear(int(4 * SCREEN_SIZE/2*SCREEN_SIZE/2),128)
         self.value_2 = nn.Linear(128,1)
     def forward(self,x,hidden_state):
         batch_size = x.size(0)
         x = F.relu(self.conv_1(x))
-        encoded = self.pooling(x)
-        
+        x_ = self.pooling(x)
+        x = x_.view(batch_size,1, 4 * int(SCREEN_SIZE/2 * SCREEN_SIZE/2))
+        x,hidden = self.action_lstm(x)
+        x = x.view(-1,4,int(SCREEN_SIZE/2), int(SCREEN_SIZE/2))
+        x = F.relu(self.conv_2(F.relu(x)))
+        encoded = x + x_
         x = self.deconv_1(encoded)
         x = x.view(-1,SCREEN_SIZE*SCREEN_SIZE)
         action = F.softmax(x,-1)
         
-        x = encoded.view(batch_size,1, 4 * int(SCREEN_SIZE/2 * SCREEN_SIZE/2))
-        x,hidden = self.lstm(x,hidden_state)
-        value = x.view(-1,4 * int(SCREEN_SIZE/2)*int(SCREEN_SIZE/2))
+        value = encoded.view(-1,4 * int(SCREEN_SIZE/2)*int(SCREEN_SIZE/2))
         value = self.value_1(value)
         value = F.relu(value)
         value = self.value_2(value)
