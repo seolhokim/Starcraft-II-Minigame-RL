@@ -183,7 +183,7 @@ class ConvLSTM(nn.Module):
 
         # Implement stateful ConvLSTM
         if hidden_state is not None:
-            raise NotImplementedError()
+            pass
         else:
             # Since the init is done in forward. Can send image size here
             hidden_state = self._init_hidden(batch_size=b,
@@ -214,7 +214,7 @@ class ConvLSTM(nn.Module):
             layer_output_list = layer_output_list[-1:]
             last_state_list = last_state_list[-1:]
 
-        return layer_output_list, last_state_list
+        return layer_output_list[0], last_state_list
 
     def _init_hidden(self, batch_size, image_size):
         init_states = []
@@ -253,11 +253,9 @@ class Network(nn.Module):
     def forward(self,x,hidden_state):
         batch_size = x.size(0)
         x = F.relu(self.conv_1(x))
-        x_ = self.pooling(x)
-        x = x_.view(batch_size,1, 4 , int(SCREEN_SIZE/2) , int(SCREEN_SIZE/2))
-        x,hidden = self.conv_lstm(x)
-        x = x[0]
-        hidden = hidden[0]
+        x = self.pooling(x)
+        x = x.view(batch_size,1, 4 , int(SCREEN_SIZE/2) , int(SCREEN_SIZE/2))
+        x,hidden = self.conv_lstm(x,hidden_state)
         x = x.view(-1,4,int(SCREEN_SIZE/2), int(SCREEN_SIZE/2))
         encoded = F.relu(self.conv_2(F.relu(x)))
         x = self.deconv_1(encoded)
@@ -306,17 +304,18 @@ class Agent(base_agent.BaseAgent):
         self.data.append(transition)
         
     def make_batch(self):
-        s_lst, a_lst, r_lst, s_prime_lst, prob_a_lst, h_in_lst, h_out_lst, done_lst = [], [], [], [], [], [], [], []
+        s_lst, a_lst, r_lst, s_prime_lst, prob_a_lst, h1_in_lst,h2_in_lst, h1_out_lst,h2_out_lst, done_lst = [], [], [], [], [], [], [], [],[],[]
         for transition in self.data:
             s, a, r, s_prime, prob_a, h_in, h_out, done = transition
-            
             s_lst.append(s)
             a_lst.append([a])
             r_lst.append([r])
             s_prime_lst.append(s_prime)
             prob_a_lst.append([prob_a])
-            h_in_lst.append(h_in)
-            h_out_lst.append(h_out)
+            h1_in_lst.append(h_in[0][0])
+            h2_in_lst.append(h_in[0][1])
+            h1_out_lst.append(h_out[0][0])
+            h2_out_lst.append(h_out[0][1])
             done_mask = 0 if done else 1
             done_lst.append([done_mask])
             
@@ -324,20 +323,22 @@ class Agent(base_agent.BaseAgent):
                                          torch.tensor(r_lst).to(device), torch.tensor(s_prime_lst, dtype=torch.float).to(device), \
                                          torch.tensor(done_lst, dtype=torch.float).to(device), torch.tensor(prob_a_lst).to(device)
         self.data = []
-        
-        return s,a,r,s_prime, done_mask, prob_a, h_in_lst[0], h_out_lst[0]
+        h1_in_lst = torch.stack(h1_in_lst).squeeze(1)
+        h2_in_lst = torch.stack(h2_in_lst).squeeze(1)
+        h1_out_lst = torch.stack(h1_out_lst).squeeze(1)
+        h2_out_lst = torch.stack(h2_out_lst).squeeze(1)
+        return s,a,r,s_prime, done_mask, prob_a, h1_in_lst,h2_in_lst,h1_out_lst,h2_out_lst
         
     def train(self):
         if len(self.data) == 0:
             print("done train error")
             return False
-        s, a, r, s_prime, done_mask, prob_a, (h1_in, h2_in), (h1_out, h2_out) = self.make_batch()
-        first_hidden  = (h1_in.detach(), h2_in.detach()) #(1,1,4096),(1,1,4096)
-        second_hidden = (h1_out.detach(), h2_out.detach()) #(1,1,4096),(1,1,4096)
-        
+        s, a, r, s_prime, done_mask, prob_a, h1_in,h2_in,h1_out,h2_out = self.make_batch()
+        first_hidden  = [(h1_in.detach(), h2_in.detach())]
+        second_hidden = [(h1_out.detach(), h2_out.detach())]
         for i in range(K_EPOCH):
-            #1. self.network에서 나온 h_out이용한 inference
-            pi,v,_ = self.network(s,first_hidden)
+            pi,v,second_hidden = self.network(s,first_hidden)
+            second_hidden = [(second_hidden[0][0].detach(),second_hidden[0][1].detach())]
             td_target = r + GAMMA * self.network(s_prime,second_hidden)[1] * done_mask
             delta = td_target - v
             delta = delta.detach().cpu().numpy()
@@ -379,9 +380,9 @@ def main(args):
                 agent.setup(env.observation_spec(), env.action_spec())
                 timestep = env.reset()
                 agent.reset()
-                done = False
-                h_out = (torch.zeros(1,1,4 * int(SCREEN_SIZE/2) * int(SCREEN_SIZE/2)).to(device),
-                torch.zeros(1,1,4 * int(SCREEN_SIZE/2) * int(SCREEN_SIZE/2)).to(device))
+                done = False 
+                h_out = [(torch.zeros(1,4,int(SCREEN_SIZE/2), int(SCREEN_SIZE/2)).to(device),
+                torch.zeros(1,4, int(SCREEN_SIZE/2), int(SCREEN_SIZE/2)).to(device))]
                 while not done:
                     for t in range(T_HORIZON):
                         h_in = h_out
