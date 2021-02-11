@@ -5,5 +5,6 @@
 ## one-agent folder
 * one-agent-cnn-based
   * Works
+   * It shows hesitating move because agent network doesn't have any temporal information.
 * one-agent-rnn-based
-  * not Works
+  * Works
