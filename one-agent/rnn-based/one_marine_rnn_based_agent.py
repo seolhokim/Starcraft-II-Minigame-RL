@@ -246,37 +246,8 @@ class Network(nn.Module):
                  bias=True,
                  return_all_layers=False)
         
-        self.conv_1 = nn.Conv2d(16,32,3,1,padding = 1)
-        self.conv_lstm_1 = ConvLSTM(input_dim=32,
-                 hidden_dim=[32],
-                 kernel_size=(3, 3),
-                 num_layers=1,
-                 batch_first=True,
-                 bias=True,
-                 return_all_layers=False)
-        
-        self.conv_2 = nn.Conv2d(32,64,3,1,padding = 1)
-        self.conv_lstm_2 = ConvLSTM(input_dim=64,
-                 hidden_dim=[64],
-                 kernel_size=(3, 3),
-                 num_layers=1,
-                 batch_first=True,
-                 bias=True,
-                 return_all_layers=False)
-        
-        self.encoding_layer = nn.Conv2d(64,64,3,1,padding=1)
-        
-        self.deconv_0 = nn.ConvTranspose2d(64, 32, 3, stride=2, padding=1, output_padding=1)
-        self.deconv_lstm_0 = ConvLSTM(input_dim=64+32,
-                 hidden_dim=[32],
-                 kernel_size=(3, 3),
-                 num_layers=1,
-                 batch_first=True,
-                 bias=True,
-                 return_all_layers=False)
-        
-        self.deconv_1 = nn.ConvTranspose2d(32, 16, 3, stride=2, padding=1, output_padding=1)
-        self.deconv_lstm_1 = ConvLSTM(input_dim=32+16,
+        self.conv_1 = nn.Conv2d(16,4,3,1,padding = 1)
+        self.conv_lstm_1 = ConvLSTM(input_dim=16,
                  hidden_dim=[16],
                  kernel_size=(3, 3),
                  num_layers=1,
@@ -284,71 +255,28 @@ class Network(nn.Module):
                  bias=True,
                  return_all_layers=False)
         
-        self.deconv_2 = nn.ConvTranspose2d(16, 8, 3, stride=2, padding=1, output_padding=1)
-        self.deconv_lstm_2 = ConvLSTM(input_dim=16+8,
-                 hidden_dim=[4],
-                 kernel_size=(3, 3),
-                 num_layers=1,
-                 batch_first=True,
-                 bias=True,
-                 return_all_layers=False)
-        
-        self.action_conv = nn.Conv2d(4,1,3,1,padding = 1)
-        
+        self.deconv_1 = nn.ConvTranspose2d(4, 1, 3, stride=2, padding=1, output_padding=1)
         self.value_1 = nn.Linear(int(64 * SCREEN_SIZE/8*SCREEN_SIZE/8),128)
         self.value_2 = nn.Linear(128,1)
     def forward(self,x,hidden_lst):
         batch_size = x.size(0)
-        
-        x_0 = F.relu(self.conv_0(x))
-        x_0 = x_0.view(batch_size,1, 16, int(SCREEN_SIZE) , int(SCREEN_SIZE))
-        x_0,hidden_0 = self.conv_lstm_0(x_0,hidden_lst[0])
-        x_0 = x_0.view(-1,16,int(SCREEN_SIZE), int(SCREEN_SIZE))
-        x = self.pooling(x_0)
-        
-        x_1 = F.relu(self.conv_1(F.relu(x)))
-        x_1 = x_1.view(batch_size,1, 32, int(SCREEN_SIZE/2) , int(SCREEN_SIZE/2))
-        x_1,hidden_1 = self.conv_lstm_1(x_1,hidden_lst[1])
-        x_1 = x_1.view(-1,32,int(SCREEN_SIZE/2), int(SCREEN_SIZE/2))
-        x = self.pooling(x_1)
-        
-        x_2 = F.relu(self.conv_2(F.relu(x)))
-        x_2 = x_2.view(batch_size,1, 64, int(SCREEN_SIZE/4) , int(SCREEN_SIZE/4))
-        x_2,hidden_2 = self.conv_lstm_2(x_2,hidden_lst[2])
-        x_2 = x_2.view(-1,64,int(SCREEN_SIZE/4), int(SCREEN_SIZE/4))
-        x = self.pooling(x_2)
-        
-        x = self.encoding_layer(F.relu(x))
-        encoded = F.relu(x)
-        
-        x = self.deconv_0(encoded)
-        x = torch.cat((x,x_2),1)
-        x = x.view(batch_size,1, 32+64, int(SCREEN_SIZE/4) , int(SCREEN_SIZE/4))
-        x,hidden_3 = self.deconv_lstm_0(x,hidden_lst[3])
-        x = x.view(-1,32,int(SCREEN_SIZE/4), int(SCREEN_SIZE/4))
-        
-        x = F.relu(self.deconv_1(F.relu(x)))
-        x = torch.cat((x,x_1),1)
-        x = x.view(batch_size,1, 16+32, int(SCREEN_SIZE/2) , int(SCREEN_SIZE/2))
-        x,hidden_4 = self.deconv_lstm_1(x,hidden_lst[4])
+        x = F.relu(self.conv_0(x))
+        x = self.pooling(x)
+        x = x.view(batch_size,1, 16, int(SCREEN_SIZE/2) , int(SCREEN_SIZE/2))
+        x,hidden_0 = self.conv_lstm_0(x,hidden_lst[0])
+        x,hidden_1 = self.conv_lstm_1(x,hidden_lst[1])
         x = x.view(-1,16,int(SCREEN_SIZE/2), int(SCREEN_SIZE/2))
+        encoded = F.relu(self.conv_1(F.relu(x)))
         
-        x = F.relu(self.deconv_2(F.relu(x)))
-        x = torch.cat((x,x_0),1)
-        x = x.view(batch_size, 1, 16+8, int(SCREEN_SIZE) , int(SCREEN_SIZE))
-        x,hidden_5 = self.deconv_lstm_2(x,hidden_lst[5])
-        
-        x = x.view(-1,4,int(SCREEN_SIZE), int(SCREEN_SIZE))
-        x = self.action_conv(F.relu(x))
-        
+        x = self.deconv_1(encoded)
         x = x.view(-1,SCREEN_SIZE*SCREEN_SIZE)
         action = F.softmax(x,-1)
         
-        value = encoded.view(-1,64 * int(SCREEN_SIZE/8)*int(SCREEN_SIZE/8))
+        value = encoded.view(-1,4 * int(SCREEN_SIZE/2)*int(SCREEN_SIZE/2))
         value = self.value_1(value)
         value = F.relu(value)
         value = self.value_2(value)
-        return action,value,[hidden_0,hidden_1,hidden_2,hidden_3,hidden_4,hidden_5]
+        return action,value,[hidden_0,hidden_1]
 
 class Agent(base_agent.BaseAgent):
     def __init__(self):
@@ -387,8 +315,8 @@ class Agent(base_agent.BaseAgent):
         
     def make_batch(self):
         s_lst, a_lst, r_lst, s_prime_lst, prob_a_lst, hidden_lst, done_lst = [], [], [], [], [], [],[]
-        h1 = [[] for _ in range(6)]
-        h2 = [[] for _ in range(6)]
+        h1 = [[] for _ in range(2)] ############
+        h2 = [[] for _ in range(2)] ############
         
         for transition in self.data:
             s, a, r, s_prime, prob_a, h_in, done = transition
@@ -397,7 +325,6 @@ class Agent(base_agent.BaseAgent):
             r_lst.append([r])
             s_prime_lst.append(s_prime)
             prob_a_lst.append([prob_a])
-            
             
             for idx in range(len(h_in)):
                 h1[idx].append(h_in[idx][0][0])
@@ -467,19 +394,11 @@ def main(args):
                 agent.reset()
                 done = False 
                 h_out = []
-                h_out.append([(torch.zeros(1,16,int(SCREEN_SIZE), int(SCREEN_SIZE)).to(device),
-                torch.zeros(1,16, int(SCREEN_SIZE), int(SCREEN_SIZE)).to(device))])
-                h_out.append([(torch.zeros(1,32,int(SCREEN_SIZE/2), int(SCREEN_SIZE/2)).to(device),
-                torch.zeros(1,32, int(SCREEN_SIZE/2), int(SCREEN_SIZE/2)).to(device))])
-                h_out.append([(torch.zeros(1,64,int(SCREEN_SIZE/4), int(SCREEN_SIZE/4)).to(device),
-                torch.zeros(1,64, int(SCREEN_SIZE/4), int(SCREEN_SIZE/4)).to(device))])
-
-                h_out.append([(torch.zeros(1,32,int(SCREEN_SIZE/4), int(SCREEN_SIZE/4)).to(device),
-                torch.zeros(1,32, int(SCREEN_SIZE/4), int(SCREEN_SIZE/4)).to(device))])
                 h_out.append([(torch.zeros(1,16,int(SCREEN_SIZE/2), int(SCREEN_SIZE/2)).to(device),
                 torch.zeros(1,16, int(SCREEN_SIZE/2), int(SCREEN_SIZE/2)).to(device))])
-                h_out.append([(torch.zeros(1,4,int(SCREEN_SIZE), int(SCREEN_SIZE)).to(device),
-                torch.zeros(1,4, int(SCREEN_SIZE), int(SCREEN_SIZE)).to(device))])
+                h_out.append([(torch.zeros(1,16,int(SCREEN_SIZE/2), int(SCREEN_SIZE/2)).to(device),
+                torch.zeros(1,16, int(SCREEN_SIZE/2), int(SCREEN_SIZE/2)).to(device))])
+
                 while not done:
                     for t in range(T_HORIZON):
                         h_in = h_out
