@@ -32,7 +32,7 @@ MOVE_SCREEN = 331
 NOT_QUEUED = [0]
 
 LEARNING_RATE = 0.001
-GAMMA         = 0.98
+GAMMA         = 0.96
 LMBDA         = 0.95
 EPS_CLIP      = 0.1
 K_EPOCH       = 5
@@ -240,21 +240,13 @@ class Network(nn.Module):
         self.conv_1 = nn.Conv2d(2,32,3,1,padding = 1)
         
         
-        self.conv_lstm_1 = ConvLSTM(input_dim=32,
-                 hidden_dim=[32],
+        self.conv_lstm = ConvLSTM(input_dim=32,
+                 hidden_dim=32,
                  kernel_size=(3, 3),
                  num_layers=1,
                  batch_first=True,
                  bias=True,
                  return_all_layers=False)
-        self.conv_lstm_2 = ConvLSTM(input_dim=32,
-                 hidden_dim=[32],
-                 kernel_size=(3, 3),
-                 num_layers=1,
-                 batch_first=True,
-                 bias=True,
-                 return_all_layers=False)
-
         self.conv_2 = nn.Conv2d(32,16,3,1,padding = 1)
         self.deconv_1 = nn.ConvTranspose2d(16, 1, 3, stride=2, padding=1, output_padding=1)
         self.value_1 = nn.Linear(int(16 * SCREEN_SIZE/2*SCREEN_SIZE/2),128)
@@ -264,8 +256,7 @@ class Network(nn.Module):
         x = F.relu(self.conv_1(x))
         x = self.pooling(x)
         x = x.view(batch_size,1, 32, int(SCREEN_SIZE/2) , int(SCREEN_SIZE/2))
-        x,hidden_1 = self.conv_lstm_1(x,hidden_state[0])
-        x,hidden_2 = self.conv_lstm_2(x,hidden_state[1])
+        x,hidden = self.conv_lstm(x,hidden_state)
         x = x.view(-1,32,int(SCREEN_SIZE/2), int(SCREEN_SIZE/2))
         
         encoded = F.relu(self.conv_2(F.relu(x)))
@@ -278,7 +269,7 @@ class Network(nn.Module):
         value = self.value_1(value)
         value = F.relu(value)
         value = self.value_2(value)
-        return action,value,[hidden_1,hidden_2]
+        return action,value,hidden
 
 class Agent(base_agent.BaseAgent):
     def __init__(self):
@@ -316,11 +307,7 @@ class Agent(base_agent.BaseAgent):
         self.data.append(transition)
         
     def make_batch(self):
-        s_lst, a_lst, r_lst, s_prime_lst, prob_a_lst, done_lst = [], [], [], [], [], []
-        h1_in_lst = [[] for _ in range(2)]
-        h2_in_lst = [[] for _ in range(2)]
-        h1_out_lst = [[] for _ in range(2)]
-        h2_out_lst = [[] for _ in range(2)]
+        s_lst, a_lst, r_lst, s_prime_lst, prob_a_lst, h1_in_lst,h2_in_lst,h1_out_lst,h2_out_lst, done_lst = [], [], [], [], [], [],[],[],[],[]
         for transition in self.data:
             s, a, r, s_prime, prob_a, h_in,h_out, done = transition
             s_lst.append(s)
@@ -328,11 +315,10 @@ class Agent(base_agent.BaseAgent):
             r_lst.append([r])
             s_prime_lst.append(s_prime)
             prob_a_lst.append([prob_a])
-            for idx in range(len(h1_in_lst)):
-                h1_in_lst[idx].append(h_in[idx][0][0])
-                h2_in_lst[idx].append(h_in[idx][0][1])
-                h1_out_lst[idx].append(h_out[idx][0][0])
-                h2_out_lst[idx].append(h_out[idx][0][1])
+            h1_in_lst.append(h_in[0][0])
+            h2_in_lst.append(h_in[0][1])
+            h1_out_lst.append(h_out[0][0])
+            h2_out_lst.append(h_out[0][1])
             done_mask = 0 if done else 1
             done_lst.append([done_mask])
             
@@ -340,12 +326,11 @@ class Agent(base_agent.BaseAgent):
                                          torch.tensor(r_lst).to(device), torch.tensor(s_prime_lst, dtype=torch.float).to(device), \
                                          torch.tensor(done_lst, dtype=torch.float).to(device), torch.tensor(prob_a_lst).to(device)
         self.data = []
-        for idx in range(len(h1_in_lst)):
-            h1_in_lst[idx] = torch.stack(h1_in_lst[idx]).squeeze(1).detach()
-            h2_in_lst[idx] = torch.stack(h2_in_lst[idx]).squeeze(1).detach()
-
-            h1_out_lst[idx] = torch.stack(h1_out_lst[idx]).squeeze(1).detach()
-            h2_out_lst[idx] = torch.stack(h2_out_lst[idx]).squeeze(1).detach()
+        h1_in_lst = torch.stack(h1_in_lst).squeeze(1)
+        h2_in_lst = torch.stack(h2_in_lst).squeeze(1)
+        
+        h1_out_lst = torch.stack(h1_out_lst).squeeze(1)
+        h2_out_lst = torch.stack(h2_out_lst).squeeze(1)
         return s,a,r,s_prime, done_mask, prob_a, h1_in_lst,h2_in_lst,h1_out_lst,h2_out_lst
         
     def train(self):
@@ -353,13 +338,8 @@ class Agent(base_agent.BaseAgent):
             print("done train error")
             return False
         s, a, r, s_prime, done_mask, prob_a, h1_in, h2_in, h1_out, h2_out = self.make_batch()
-        #first_hidden  = [(h1_in, h2_in)]
-        #second_hidden = [(h1_out, h2_out)]
-        first_hidden = []
-        second_hidden = []
-        for idx in range(len(h1_in)):
-            first_hidden.append([(h1_in[idx], h2_in[idx])])
-            second_hidden.append([(h1_out[idx], h2_out[idx])])
+        first_hidden  = [(h1_in.detach(), h2_in.detach())]
+        second_hidden = [(h1_out.detach(), h2_out.detach())]
         for i in range(K_EPOCH):
             pi,v,_ = self.network(s,first_hidden)
             #second_hidden = [(second_hidden[0][0].detach(),second_hidden[0][1].detach())]
@@ -379,7 +359,7 @@ class Agent(base_agent.BaseAgent):
             surr2 = torch.clamp(ratio, 1-EPS_CLIP, 1+EPS_CLIP) * advantage
             loss = -torch.min(surr1, surr2).mean() + F.smooth_l1_loss(v , td_target.detach().float())
             self.optimizer.zero_grad()
-            loss.backward(retain_graph=True)
+            loss.backward()
             self.optimizer.step()
         return True
 def get_state(obs):
@@ -405,12 +385,8 @@ def main(args):
                 timestep = env.reset()
                 agent.reset()
                 done = False 
-                h_out = [
-                    [(torch.zeros(1,32,int(SCREEN_SIZE/2), int(SCREEN_SIZE/2)).to(device),
-                torch.zeros(1,32, int(SCREEN_SIZE/2), int(SCREEN_SIZE/2)).to(device))],
-                    [(torch.zeros(1,32,int(SCREEN_SIZE/2), int(SCREEN_SIZE/2)).to(device),
+                h_out = [(torch.zeros(1,32,int(SCREEN_SIZE/2), int(SCREEN_SIZE/2)).to(device),
                 torch.zeros(1,32, int(SCREEN_SIZE/2), int(SCREEN_SIZE/2)).to(device))]
-                    ]
                 while not done:
                     for t in range(T_HORIZON):
                         h_in = h_out
