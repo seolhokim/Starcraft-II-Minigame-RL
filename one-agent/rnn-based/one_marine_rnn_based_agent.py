@@ -32,7 +32,7 @@ MOVE_SCREEN = 331
 NOT_QUEUED = [0]
 
 LEARNING_RATE = 0.001
-GAMMA         = 0.96
+GAMMA         = 0.98
 LMBDA         = 0.95
 EPS_CLIP      = 0.1
 K_EPOCH       = 5
@@ -241,7 +241,7 @@ class Network(nn.Module):
         
         
         self.conv_lstm = ConvLSTM(input_dim=32,
-                 hidden_dim=32,
+                 hidden_dim=[32],
                  kernel_size=(3, 3),
                  num_layers=1,
                  batch_first=True,
