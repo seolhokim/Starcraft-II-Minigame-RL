@@ -307,9 +307,9 @@ class Agent(base_agent.BaseAgent):
         self.data.append(transition)
         
     def make_batch(self):
-        s_lst, a_lst, r_lst, s_prime_lst, prob_a_lst, h1_in_lst,h2_in_lst, done_lst = [], [], [], [], [], [],[],[]
+        s_lst, a_lst, r_lst, s_prime_lst, prob_a_lst, h1_in_lst,h2_in_lst,h1_out_lst,h2_out_lst, done_lst = [], [], [], [], [], [],[],[],[],[]
         for transition in self.data:
-            s, a, r, s_prime, prob_a, h_in, done = transition
+            s, a, r, s_prime, prob_a, h_in,h_out, done = transition
             s_lst.append(s)
             a_lst.append([a])
             r_lst.append([r])
@@ -317,6 +317,8 @@ class Agent(base_agent.BaseAgent):
             prob_a_lst.append([prob_a])
             h1_in_lst.append(h_in[0][0])
             h2_in_lst.append(h_in[0][1])
+            h1_out_lst.append(h_out[0][0])
+            h2_out_lst.append(h_out[0][1])
             done_mask = 0 if done else 1
             done_lst.append([done_mask])
             
@@ -326,17 +328,21 @@ class Agent(base_agent.BaseAgent):
         self.data = []
         h1_in_lst = torch.stack(h1_in_lst).squeeze(1)
         h2_in_lst = torch.stack(h2_in_lst).squeeze(1)
-        return s,a,r,s_prime, done_mask, prob_a, h1_in_lst,h2_in_lst
+        
+        h1_out_lst = torch.stack(h1_out_lst).squeeze(1)
+        h2_out_lst = torch.stack(h2_out_lst).squeeze(1)
+        return s,a,r,s_prime, done_mask, prob_a, h1_in_lst,h2_in_lst,h1_out_lst,h2_out_lst
         
     def train(self):
         if len(self.data) == 0:
             print("done train error")
             return False
-        s, a, r, s_prime, done_mask, prob_a, h1_in,h2_in = self.make_batch()
+        s, a, r, s_prime, done_mask, prob_a, h1_in, h2_in, h1_out, h2_out = self.make_batch()
         first_hidden  = [(h1_in.detach(), h2_in.detach())]
+        second_hidden = [(h1_out.detach(), h2_out.detach())]
         for i in range(K_EPOCH):
-            pi,v,second_hidden = self.network(s,first_hidden)
-            second_hidden = [(second_hidden[0][0].detach(),second_hidden[0][1].detach())]
+            pi,v,_ = self.network(s,first_hidden)
+            #second_hidden = [(second_hidden[0][0].detach(),second_hidden[0][1].detach())]
             td_target = r + GAMMA * self.network(s_prime,second_hidden)[1] * done_mask
             delta = td_target - v
             delta = delta.detach().cpu().numpy()
@@ -399,7 +405,7 @@ def main(args):
                             done = True
                         if (len(action_info) > 2) :
                             next_state = get_state(timestep[0])
-                            agent.put_data((state, action_coords, reward/100.0, next_state, action_prob.item(),h_in,  done))
+                            agent.put_data((state, action_coords, reward/100.0, next_state, action_prob.item(),h_in,h_out, done))
                         if done == True:
                             print('score : ',score)
                             score = 0
