@@ -237,35 +237,79 @@ class Network(nn.Module):
     def __init__(self):
         super(Network,self).__init__()
         self.pooling = nn.MaxPool2d(2)
-        self.conv_1 = nn.Conv2d(2,32,3,1,padding = 1)
+        self.conv_0 = nn.Conv2d(2,16,3,1,padding = 1)
         
         
-        self.conv_lstm = ConvLSTM(input_dim=32,
-                 hidden_dim=[32],
+        self.conv_lstm = ConvLSTM(input_dim=16,
+                 hidden_dim=[16],
                  kernel_size=(3, 3),
                  num_layers=1,
                  batch_first=True,
                  bias=True,
                  return_all_layers=False)
-        self.conv_2 = nn.Conv2d(32,16,3,1,padding = 1)
-        self.deconv_1 = nn.ConvTranspose2d(16, 1, 3, stride=2, padding=1, output_padding=1)
-        self.value_1 = nn.Linear(int(16 * SCREEN_SIZE/2*SCREEN_SIZE/2),128)
+        
+        self.conv_1 = nn.Conv2d(16,16,3,1,padding = 1)
+        self.conv_2 = nn.Conv2d(16,32,3,1,padding = 1)
+        self.conv_3 = nn.Conv2d(32,64,3,1,padding = 1)
+        
+        
+        self.encoding = nn.Conv2d(64,64,3,1,padding = 1)
+        
+        
+        self.deconv_1 = nn.ConvTranspose2d(64, 32, 3, stride=2, padding=1, output_padding=1)
+        self.deconv_1_1 = nn.Conv2d(96,32,3,1,padding = 1)
+        
+        self.deconv_2 = nn.ConvTranspose2d(32, 16, 3, stride=2, padding=1, output_padding=1)
+        self.deconv_2_1 = nn.Conv2d(48,16,3,1,padding = 1)
+        
+        self.deconv_3 = nn.ConvTranspose2d(16, 8, 3, stride=2, padding=1, output_padding=1)
+        self.deconv_3_1 = nn.Conv2d(24,8,3,1,padding = 1)
+        
+        self.action = nn.Conv2d(8,1,3,1,padding = 1)
+        
+        self.value_1 = nn.Linear(int(64 * SCREEN_SIZE/8*SCREEN_SIZE/8),128)
         self.value_2 = nn.Linear(128,1)
     def forward(self,x,hidden_state):
         batch_size = x.size(0)
-        x = F.relu(self.conv_1(x))
-        x = self.pooling(x)
-        x = x.view(batch_size,1, 32, int(SCREEN_SIZE/2) , int(SCREEN_SIZE/2))
+        x = F.relu(self.conv_0(x))
+        x = x.view(batch_size,1, 16, int(SCREEN_SIZE) , int(SCREEN_SIZE))
         x,hidden = self.conv_lstm(x,hidden_state)
-        x = x.view(-1,32,int(SCREEN_SIZE/2), int(SCREEN_SIZE/2))
+        x = x.view(-1,16,int(SCREEN_SIZE), int(SCREEN_SIZE)) # 32
         
-        encoded = F.relu(self.conv_2(F.relu(x)))
+        x_1 = F.relu(x)
+        x_1 = self.conv_1(x_1) #32
+        x = self.pooling(x_1) # 16
         
-        x = self.deconv_1(encoded)
-        x = x.view(-1,SCREEN_SIZE*SCREEN_SIZE)
-        action = F.softmax(x,-1)
+        x_2 = F.relu(x)
+        x_2 = self.conv_2(x_2) #16
+        x = self.pooling(x_2) #8
         
-        value = encoded.view(-1,16 * int(SCREEN_SIZE/2)*int(SCREEN_SIZE/2))
+        x_3 = F.relu(x)
+        x_3 = self.conv_3(x_3) #8
+        x = self.pooling(x_3) # 4
+        
+        encoded = F.relu(self.encoding(F.relu(x))) #4
+        
+        x = self.deconv_1(encoded) #8, 
+        x = torch.cat((x,x_3),1)#,64+32
+        x = F.relu(x) #8
+        x = self.deconv_1_1(x) #,32
+        
+        x = self.deconv_2(x) #16 
+        x = torch.cat((x,x_2),1)#,32+16
+        x = F.relu(x) #8
+        x = self.deconv_2_1(x)#,16
+        
+        x = self.deconv_3(x) #32
+        x = torch.cat((x,x_1),1)#,8+16
+        x = F.relu(x) #8
+        x = self.deconv_3_1(x)#,16
+        
+        action = self.action(F.relu(x))
+        action = action.view(-1,SCREEN_SIZE*SCREEN_SIZE)
+        action = F.softmax(action,-1)
+        
+        value = encoded.view(-1,64 * int(SCREEN_SIZE/8)*int(SCREEN_SIZE/8))
         value = self.value_1(value)
         value = F.relu(value)
         value = self.value_2(value)
@@ -385,8 +429,8 @@ def main(args):
                 timestep = env.reset()
                 agent.reset()
                 done = False 
-                h_out = [(torch.zeros(1,32,int(SCREEN_SIZE/2), int(SCREEN_SIZE/2)).to(device),
-                torch.zeros(1,32, int(SCREEN_SIZE/2), int(SCREEN_SIZE/2)).to(device))]
+                h_out = [(torch.zeros(1,16,int(SCREEN_SIZE), int(SCREEN_SIZE)).to(device),
+                torch.zeros(1,16, int(SCREEN_SIZE), int(SCREEN_SIZE)).to(device))]
                 while not done:
                     for t in range(T_HORIZON):
                         h_in = h_out
