@@ -256,7 +256,7 @@ class Network(nn.Module):
                  return_all_layers=False)
         
         self.deconv_1 = nn.ConvTranspose2d(4, 1, 3, stride=2, padding=1, output_padding=1)
-        self.value_1 = nn.Linear(int(64 * SCREEN_SIZE/8*SCREEN_SIZE/8),128)
+        self.value_1 = nn.Linear(int(4 * SCREEN_SIZE/2*SCREEN_SIZE/2),128)
         self.value_2 = nn.Linear(128,1)
     def forward(self,x,hidden_lst):
         batch_size = x.size(0)
@@ -264,7 +264,6 @@ class Network(nn.Module):
         x = self.pooling(x)
         x = x.view(batch_size,1, 16, int(SCREEN_SIZE/2) , int(SCREEN_SIZE/2))
         x,hidden_0 = self.conv_lstm_0(x,hidden_lst[0])
-        x,hidden_1 = self.conv_lstm_1(x,hidden_lst[1])
         x = x.view(-1,16,int(SCREEN_SIZE/2), int(SCREEN_SIZE/2))
         encoded = F.relu(self.conv_1(F.relu(x)))
         
@@ -276,7 +275,7 @@ class Network(nn.Module):
         value = self.value_1(value)
         value = F.relu(value)
         value = self.value_2(value)
-        return action,value,[hidden_0,hidden_1]
+        return action,value,[hidden_0]
 
 class Agent(base_agent.BaseAgent):
     def __init__(self):
@@ -315,8 +314,8 @@ class Agent(base_agent.BaseAgent):
         
     def make_batch(self):
         s_lst, a_lst, r_lst, s_prime_lst, prob_a_lst, hidden_lst, done_lst = [], [], [], [], [], [],[]
-        h1 = [[] for _ in range(2)] ############
-        h2 = [[] for _ in range(2)] ############
+        h1 = [[] for _ in range(1)] ############
+        h2 = [[] for _ in range(1)] ############
         
         for transition in self.data:
             s, a, r, s_prime, prob_a, h_in, done = transition
@@ -394,8 +393,6 @@ def main(args):
                 agent.reset()
                 done = False 
                 h_out = []
-                h_out.append([(torch.zeros(1,16,int(SCREEN_SIZE/2), int(SCREEN_SIZE/2)).to(device),
-                torch.zeros(1,16, int(SCREEN_SIZE/2), int(SCREEN_SIZE/2)).to(device))])
                 h_out.append([(torch.zeros(1,16,int(SCREEN_SIZE/2), int(SCREEN_SIZE/2)).to(device),
                 torch.zeros(1,16, int(SCREEN_SIZE/2), int(SCREEN_SIZE/2)).to(device))])
 
